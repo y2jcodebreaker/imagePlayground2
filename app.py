@@ -679,6 +679,7 @@ elif app_mode == "Meme Factory 😂":
                 safe_balloon()
     st.markdown('</div>', unsafe_allow_html=True)
 
+
 # --- Page: Image Digitization ---
 elif app_mode == "Image Digitization":
     st.markdown('<div class="main">', unsafe_allow_html=True)
@@ -1170,8 +1171,31 @@ elif app_mode == "Shape Analysis":
         image_gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if image.ndim == 3 else image
         
         st.markdown("### 🔢 Shape Detection")
-        # Preprocess the image for shape detection
-        _, binary = cv2.threshold(image_gray, 127, 255, cv2.THRESH_BINARY)
+        
+        # Add preprocessing options to improve shape detection
+        preprocessing_options = st.selectbox(
+            "Select Preprocessing Method", 
+            ["Basic Thresholding", "Adaptive Thresholding", "Canny Edge Detection"]
+        )
+        
+        # Add controls for threshold values
+        col1, col2 = st.columns(2)
+        with col1:
+            thresh_val = st.slider("Threshold Value", 0, 255, 127)
+        with col2:
+            min_area = st.slider("Minimum Contour Area", 10, 10000, 500)
+        
+        # Preprocess the image based on selected method
+        if preprocessing_options == "Basic Thresholding":
+            _, binary = cv2.threshold(image_gray, thresh_val, 255, cv2.THRESH_BINARY)
+        elif preprocessing_options == "Adaptive Thresholding":
+            binary = cv2.adaptiveThreshold(image_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                          cv2.THRESH_BINARY, 11, 2)
+        else:  # Canny Edge Detection
+            binary = cv2.Canny(image_gray, thresh_val, thresh_val * 2)
+            # Dilate edges to close contours
+            kernel = np.ones((3, 3), np.uint8)
+            binary = cv2.dilate(binary, kernel, iterations=1)
         
         # Create a copy of the original for drawing on
         if image.ndim == 3:
@@ -1179,70 +1203,153 @@ elif app_mode == "Shape Analysis":
         else:
             shape_image = cv2.cvtColor(image_gray, cv2.COLOR_GRAY2RGB)
         
-        min_area = st.slider("Minimum Contour Area", 10, 10000, 500)
+        # Show the binary image used for contour detection
+        st.image(binary, caption="Preprocessed Binary Image", use_column_width=True)
         
         try:
-            contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            # Find contours with different retrieval mode and approximation method
+            contours, hierarchy = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Filter contours by area
             filtered_contours = [cnt for cnt in contours if cv2.contourArea(cnt) > min_area]
+            
+            # Allow user to adjust approximation accuracy
+            epsilon_factor = st.slider("Shape Approximation Accuracy", 0.01, 0.1, 0.02, 0.01,
+                                    help="Lower values preserve more details, higher values simplify shapes")
+            
+            # Draw all contours for visualization
             cv2.drawContours(shape_image, filtered_contours, -1, (0, 255, 0), 2)
+            
             shape_info = []
+            shape_colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), 
+                           (0, 255, 255), (255, 0, 255), (128, 128, 0)]
+            
             for i, cnt in enumerate(filtered_contours):
+                # Get basic measurements
                 area = cv2.contourArea(cnt)
                 perimeter = cv2.arcLength(cnt, True)
+                
+                # Calculate shape center
                 M = cv2.moments(cnt)
                 if M["m00"] != 0:
                     cx = int(M["m10"] / M["m00"])
                     cy = int(M["m01"] / M["m00"])
-                    cv2.circle(shape_image, (cx, cy), 5, (255, 0, 0), -1)
-                    cv2.putText(shape_image, str(i+1), (cx-10, cy-10), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
-                    epsilon = 0.04 * perimeter
+                    
+                    # Approximate the contour to simplify shape
+                    epsilon = epsilon_factor * perimeter
                     approx = cv2.approxPolyDP(cnt, epsilon, True)
+                    
+                    # Draw center point and ID number
+                    color = shape_colors[i % len(shape_colors)]
+                    cv2.circle(shape_image, (cx, cy), 5, color, -1)
+                    cv2.putText(shape_image, str(i+1), (cx-10, cy-10), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                    
+                    # Improved shape classification
                     shape_name = "Unknown"
-                    if len(approx) == 3:
-                        shape_name = "Triangle"
-                    elif len(approx) == 4:
+                    vertices = len(approx)
+                    
+                    # Calculate form factor (circularity)
+                    form_factor = 4 * np.pi * area / (perimeter * perimeter) if perimeter > 0 else 0
+                    
+                    # Rectangle-specific check
+                    if vertices == 4:
+                        # Calculate aspect ratio
                         x, y, w, h = cv2.boundingRect(approx)
-                        aspect_ratio = float(w) / h
-                        if 0.95 <= aspect_ratio <= 1.05:
+                        aspect_ratio = float(w) / h if h > 0 else 0
+                        
+                        # Check if it's approximately a square
+                        if 0.9 <= aspect_ratio <= 1.1:
                             shape_name = "Square"
                         else:
                             shape_name = "Rectangle"
-                    elif len(approx) == 5:
+                    # Triangle
+                    elif vertices == 3:
+                        shape_name = "Triangle"
+                    # Pentagon
+                    elif vertices == 5:
                         shape_name = "Pentagon"
-                    elif len(approx) == 6:
+                    # Hexagon
+                    elif vertices == 6:
                         shape_name = "Hexagon"
-                    elif len(approx) > 6:
-                        # Check if it's a circle
-                        circularity = 4 * np.pi * area / (perimeter * perimeter)
-                        if circularity > 0.8:
-                            shape_name = "Circle"
-                        else:
-                            shape_name = f"Polygon ({len(approx)} sides)"
+                    # Circle detection based on form factor (circularity)
+                    elif form_factor > 0.8 and vertices >= 8:
+                        shape_name = "Circle"
+                    # Other polygons
+                    elif vertices > 6:
+                        shape_name = f"Polygon ({vertices} sides)"
                     
-                    # Add to shape info
+                    # Draw the vertices of the approximated shape
+                    for point in approx:
+                        cv2.circle(shape_image, tuple(point[0]), 3, (0, 0, 255), -1)
+                    
+                    # Add to shape info with more detailed measurements
                     shape_info.append({
                         "id": i+1,
                         "shape": shape_name,
                         "area": int(area),
                         "perimeter": int(perimeter),
-                        "vertices": len(approx)
+                        "vertices": vertices,
+                        "circularity": round(form_factor, 2)
                     })
             
+            # Display the image with detected shapes
             st.image(shape_image, caption="Detected Shapes", use_column_width=True)
             
+            # Display shape information in a more structured format
             if shape_info:
                 st.markdown("### 📋 Shape Analysis Results")
-                for shape in shape_info:
+                
+                # Create a more visually appealing results display
+                for i, shape in enumerate(shape_info):
+                    color = shape_colors[i % len(shape_colors)]
+                    color_hex = "#{:02x}{:02x}{:02x}".format(color[0], color[1], color[2])
+                    
                     st.markdown(f"""
-                    **Shape {shape['id']}**: {shape['shape']}  
-                    Area: {shape['area']} px², Perimeter: {shape['perimeter']} px, Vertices: {shape['vertices']}
-                    """)
+                    <div style="background-color: rgba({color[0]}, {color[1]}, {color[2]}, 0.1); 
+                                border-left: 5px solid {color_hex}; padding: 10px; margin-bottom: 10px;">
+                        <h4>Shape {shape['id']}: {shape['shape']}</h4>
+                        <ul>
+                            <li><strong>Area:</strong> {shape['area']} px²</li>
+                            <li><strong>Perimeter:</strong> {shape['perimeter']} px</li>
+                            <li><strong>Vertices:</strong> {shape['vertices']}</li>
+                            <li><strong>Circularity:</strong> {shape['circularity']} (1.0 = perfect circle)</li>
+                        </ul>
+                    </div>
+                    """, unsafe_allow_html=True)
             else:
-                st.info("No shapes detected with the current settings. Try adjusting the minimum area.")
+                st.info("No shapes detected with the current settings. Try adjusting the thresholds or preprocessing method.")
                 
         except Exception as e:
             st.error(f"Error analyzing shapes: {e}")
+            st.info("Tips: Try different preprocessing methods, adjust the threshold value, or change the minimum contour area.")
+    
+    # Add informational section about shape analysis
+    with st.expander("About Shape Analysis"):
+        st.markdown("""
+        ### How Shape Analysis Works
+        
+        This tool uses computer vision techniques to identify and analyze shapes in your images:
+        
+        1. **Preprocessing**: Converts your image to binary (black and white) using thresholding or edge detection
+        
+        2. **Contour Detection**: Finds the outlines of objects in the binary image
+        
+        3. **Shape Approximation**: Simplifies contours into polygons with fewer vertices
+        
+        4. **Classification**: Determines shape type based on the number of vertices and geometric properties
+        
+        5. **Measurement**: Calculates area, perimeter, circularity, and other properties
+        
+        ### Tips for Better Results
+        
+        - Use images with clear, distinct shapes against contrasting backgrounds
+        - Adjust the threshold to properly separate shapes from background
+        - Try different preprocessing methods for complex images
+        - Increase minimum area to filter out small noise
+        - Adjust shape approximation accuracy for more or less detail
+        """)
+    
     st.markdown('</div>', unsafe_allow_html=True)
 
 

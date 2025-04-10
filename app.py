@@ -633,45 +633,57 @@ elif app_mode == "Meme Factory 😂":
             # Create a copy of the image to avoid modifying the original
             meme_img = img.copy()
             draw = ImageDraw.Draw(meme_img)
-            try:
-                # Use default font instead of trying to load Impact
-                font = ImageFont.load_default()
-            except:
-                font = ImageFont.load_default()
             
-            # Calculate font size based on image width
-            font_size = max(14, int(meme_img.width / 15))
+            # Calculate font size based on image width - MUCH LARGER now
+            font_size = max(32, int(meme_img.width / 8))  # Increased from /15 to /8
+            
+            # Try multiple font options
             try:
-                font = ImageFont.truetype("Arial.ttf", font_size)
+                # Try to use Impact font - the classic meme font
+                font = ImageFont.truetype("Impact.ttf", font_size)
             except:
-                # Fall back to default font if Arial is not available
-                pass
+                try:
+                    # Fall back to Arial
+                    font = ImageFont.truetype("Arial.ttf", font_size)
+                except:
+                    try:
+                        # Try system font
+                        font = ImageFont.truetype("DejaVuSans.ttf", font_size)
+                    except:
+                        # Last resort: default font
+                        font = ImageFont.load_default()
+                        # Since default font is small, make text size larger
+                        font_size = max(48, int(meme_img.width / 6))
+            
+            # Function to draw text with better outline for visibility
+            def draw_outlined_text(text, position):
+                # Thicker outline (4 pixels instead of 2)
+                outline_width = 4
+                # Draw text outline/shadow
+                for adj_x in range(-outline_width, outline_width + 1, 2):
+                    for adj_y in range(-outline_width, outline_width + 1, 2):
+                        draw.text((position[0] + adj_x, position[1] + adj_y), text, font=font, fill="black")
+                
+                # Draw main text
+                draw.text(position, text, font=font, fill="white")
+            
+            # Convert text to uppercase for classic meme style
+            top_text = top_text.upper()
+            bottom_text = bottom_text.upper()
             
             # Draw top text
             bbox = draw.textbbox((0, 0), top_text, font=font)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
-            position = ((meme_img.width - text_width) // 2, 10)
-            # Add text shadow for better visibility
-            draw.text((position[0]-2, position[1]-2), top_text, font=font, fill="black")
-            draw.text((position[0]+2, position[1]-2), top_text, font=font, fill="black")
-            draw.text((position[0]-2, position[1]+2), top_text, font=font, fill="black")
-            draw.text((position[0]+2, position[1]+2), top_text, font=font, fill="black")
-            # Draw main text
-            draw.text(position, top_text, font=font, fill="white")
+            position = ((meme_img.width - text_width) // 2, 20)  # Positioned slightly lower
+            draw_outlined_text(top_text, position)
             
             # Draw bottom text
             bbox = draw.textbbox((0, 0), bottom_text, font=font)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
-            position = ((meme_img.width - text_width) // 2, meme_img.height - text_height - 10)
-            # Add text shadow for better visibility
-            draw.text((position[0]-2, position[1]-2), bottom_text, font=font, fill="black")
-            draw.text((position[0]+2, position[1]-2), bottom_text, font=font, fill="black")
-            draw.text((position[0]-2, position[1]+2), bottom_text, font=font, fill="black")
-            draw.text((position[0]+2, position[1]+2), bottom_text, font=font, fill="black")
-            # Draw main text
-            draw.text(position, bottom_text, font=font, fill="white")
+            position = ((meme_img.width - text_width) // 2, meme_img.height - text_height - 20)  # More margin
+            draw_outlined_text(bottom_text, position)
             
             st.image(meme_img, caption="Your Fresh Meme", use_column_width=True)
             if unlock_achievement('meme_genius'):
